@@ -30,7 +30,7 @@ const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
 
 //comment out to completly disable respective technology
 #define INCLUDE_BLYNK_SUPPORT
-#define INCLUDE_MQTT_SUPPORT
+//#define INCLUDE_MQTT_SUPPORT
 
 
 /********************************************
@@ -55,17 +55,18 @@ static bool MQTT_ENABLED              = true;
 int         lastMQTTConnectionAttempt = 0;
 #endif
 
-#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
+#include <ESP_WiFiManager.h>          //https://github.com/madhephaestus/Esp32WifiManager
 
 #include <EEPROM.h>
 
 #define EEPROM_SALT 12667
 typedef struct {
   char  bootState[4]      = "off";
+  char  hostname[33]      = HOSTNAME;
   char  blynkToken[33]    = "";
-  char  blynkServer[33]   = "blynk-cloud.com";
-  char  blynkPort[6]      = "8442";
-  char  mqttHostname[33]  = "";
+  char  blynkServer[33]   = "serverino.sapacasa.it";
+  char  blynkPort[6]      = "8080";
+  char  mqttHostname[33]  = HOSTNAME;
   char  mqttPort[6]       = "1883";
   char  mqttClientID[24]  = HOSTNAME;
   char  mqttTopic[33]     = HOSTNAME;
@@ -119,7 +120,7 @@ void tick()
 }
 
 //gets called when WiFiManager enters configuration mode
-void configModeCallback (WiFiManager *myWiFiManager) {
+void configModeCallback (ESP_WiFiManager *myWiFiManager) {
   Serial.println("Entered config mode");
   Serial.println(WiFi.softAPIP());
   //if you used auto generated SSID, print it
@@ -298,12 +299,12 @@ void mqttCallback(const MQTT::Publish& pub) {
     Serial.println(pub.payload_string());
     String topic = pub.topic();
     String payload = pub.payload_string();
-    
+
     if (topic == settings.mqttTopic) {
       Serial.println("exact match");
       return;
     }
-    
+
     if (topic.startsWith(settings.mqttTopic)) {
       Serial.println("for this device");
       topic = topic.substring(strlen(settings.mqttTopic) + 1);
@@ -327,11 +328,11 @@ void mqttCallback(const MQTT::Publish& pub) {
       if(payload == "") {
         updateMQTT(channel);
       }
-      
+
     }
   }
 }
-    
+
 #endif
 
 void setup()
@@ -344,9 +345,9 @@ void setup()
   ticker.attach(0.6, tick);
 
 
-  const char *hostname = HOSTNAME;
+  char *hostname = HOSTNAME;
 
-  WiFiManager wifiManager;
+  ESP_WiFiManager wifiManager;
   //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
   wifiManager.setAPCallback(configModeCallback);
 
@@ -365,8 +366,11 @@ void setup()
   }
 
 
-  WiFiManagerParameter custom_boot_state("boot-state", "on/off on boot", settings.bootState, 33);
+  ESP_WMParameter custom_boot_state("boot-state", "on/off on boot", settings.bootState, 33);
   wifiManager.addParameter(&custom_boot_state);
+
+  ESP_WMParameter custom_hostname("custom-hostname", "Sensor Hostname", settings.hostname, 33);
+  wifiManager.addParameter(&custom_hostname);
 
 
   Serial.println(settings.bootState);
@@ -376,16 +380,16 @@ void setup()
   Serial.println(settings.blynkServer);
   Serial.println(settings.blynkPort);
 
-  WiFiManagerParameter custom_blynk_text("<br/>Blynk config. <br/> No token to disable.<br/>");
+  ESP_WMParameter custom_blynk_text("<br/>Blynk config. <br/> No token to disable.<br/>");
   wifiManager.addParameter(&custom_blynk_text);
 
-  WiFiManagerParameter custom_blynk_token("blynk-token", "blynk token", settings.blynkToken, 33);
+  ESP_WMParameter custom_blynk_token("blynk-token", "blynk token", settings.blynkToken, 33);
   wifiManager.addParameter(&custom_blynk_token);
 
-  WiFiManagerParameter custom_blynk_server("blynk-server", "blynk server", settings.blynkServer, 33);
+  ESP_WMParameter custom_blynk_server("blynk-server", "blynk server", settings.blynkServer, 33);
   wifiManager.addParameter(&custom_blynk_server);
 
-  WiFiManagerParameter custom_blynk_port("blynk-port", "port", settings.blynkPort, 6);
+  ESP_WMParameter custom_blynk_port("blynk-port", "port", settings.blynkPort, 6);
   wifiManager.addParameter(&custom_blynk_port);
 #endif
 
@@ -395,7 +399,7 @@ void setup()
   Serial.println(settings.mqttPort);
   Serial.println(settings.mqttClientID);
   Serial.println(settings.mqttTopic);
-  
+
   WiFiManagerParameter custom_mqtt_text("<br/>MQTT config. <br/> No url to disable.<br/>");
   wifiManager.addParameter(&custom_mqtt_text);
 
@@ -415,6 +419,11 @@ void setup()
   //set config save notify callback
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
+  // Getting saved hostname
+  if (!strcmp(settings.hostname,"")) {
+    strcpy(hostname, custom_hostname.getValue());
+  }
+
   if (!wifiManager.autoConnect(hostname)) {
     Serial.println("failed to connect and hit timeout");
     //reset and try again, or maybe put it to deep sleep
@@ -428,9 +437,11 @@ void setup()
     Serial.println("Saving config");
 
     strcpy(settings.bootState, custom_boot_state.getValue());
+    strcpy(settings.hostname, custom_hostname.getValue());
 
 #ifdef INCLUDE_BLYNK_SUPPORT
     strcpy(settings.blynkToken, custom_blynk_token.getValue());
+
     strcpy(settings.blynkServer, custom_blynk_server.getValue());
     strcpy(settings.blynkPort, custom_blynk_port.getValue());
 #endif
