@@ -26,7 +26,7 @@ const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
 //S20 Smart Socket works better with it false
 #define SONOFF_LED_RELAY_STATE      false
 
-#define HOSTNAME "sonoff"
+#define HOSTNAME "sonoff_switch02"
 
 //comment out to completly disable respective technology
 #define INCLUDE_BLYNK_SUPPORT
@@ -39,7 +39,7 @@ const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
 #include <ESP8266WiFi.h>
 
 #ifdef INCLUDE_BLYNK_SUPPORT
-#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
+//#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
 #include <BlynkSimpleEsp8266.h>
 
 static bool BLYNK_ENABLED = true;
@@ -51,7 +51,7 @@ static bool BLYNK_ENABLED = true;
 WiFiClient wclient;
 PubSubClient mqttClient(wclient);
 
-static bool MQTT_ENABLED              = true;
+static bool MQTT_ENABLED              = false;
 int         lastMQTTConnectionAttempt = 0;
 #endif
 
@@ -129,15 +129,15 @@ void configModeCallback (ESP_WiFiManager *myWiFiManager) {
   ticker.attach(0.2, tick);
 }
 
-void updateBlynk(int channel) {
 #ifdef INCLUDE_BLYNK_SUPPORT
+void updateBlynk(int channel) {
   int state = digitalRead(SONOFF_RELAY_PINS[channel]);
   Blynk.virtualWrite(channel * 5 + 4, state * 255);
-#endif
 }
+#endif
 
-void updateMQTT(int channel) {
 #ifdef INCLUDE_MQTT_SUPPORT
+void updateMQTT(int channel) {
   int state = digitalRead(SONOFF_RELAY_PINS[channel]);
   char topic[50];
   sprintf(topic, "%s/channel-%d/status", settings.mqttTopic, channel);
@@ -146,8 +146,8 @@ void updateMQTT(int channel) {
     stateString = "disabled";
   }
   mqttClient.publish(topic, stateString);
-#endif
 }
+#endif
 
 void setState(int state, int channel) {
   //relay
@@ -158,12 +158,15 @@ void setState(int state, int channel) {
     digitalWrite(SONOFF_LED, (state + 1) % 2); // led is active low
   }
 
+#ifdef INCLUDE_BLYNK_SUPPORT
   //blynk
   updateBlynk(channel);
+#endif
 
+#ifdef INCLUDE_MQTT_SUPPORT
   //MQTT
   updateMQTT(channel);
-
+#endif
 }
 
 void turnOn(int channel = 0) {
@@ -280,6 +283,7 @@ BLYNK_WRITE(31) {
   }
 }
 
+BLYNK_READ
 #endif
 
 #ifdef INCLUDE_MQTT_SUPPORT
@@ -421,7 +425,7 @@ void setup()
 
   // Getting saved hostname
   if (!strcmp(settings.hostname,"")) {
-    strcpy(hostname, custom_hostname.getValue());
+    strcpy(hostname, settings.hostname);
   }
 
   if (!wifiManager.autoConnect(hostname)) {
@@ -603,6 +607,4 @@ void loop()
       }
       break;
   }
-
-
 }
