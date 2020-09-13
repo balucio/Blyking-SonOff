@@ -16,67 +16,99 @@
 
 */
 
+
+// DEBUG
+
+// #define BLYNK_PRINT Serial    
+#define BLYNK_WM_DEBUG 0
+#define DOUBLERESETDETECTOR_DEBUG     false
+
+//// CONFIG PORTAL
+#define CONFIG_PORTAL_IPADDRESS 192,168,4,1
+
 #define   SONOFF_BUTTON             0
 #define   SONOFF_INPUT              14
 #define   SONOFF_LED                13
 #define   SONOFF_AVAILABLE_CHANNELS 1
 const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
-//if this is false, led is used to signal startup state, then always on
-//if it s true, it is used to signal startup state, then mirrors relay state
-//S20 Smart Socket works better with it false
-#define SONOFF_LED_RELAY_STATE      false
 
-#define HOSTNAME "sonoff_switch02"
+/*
+ * if this is false, led is used to signal startup state, then always on
+ * if it s true, it is used to signal startup state, then mirrors relay state
+ * S20 Smart Socket works better with it false
+ */
+#define SONOFF_LED_RELAY_STATE      true
 
-//comment out to completly disable respective technology
-#define INCLUDE_BLYNK_SUPPORT
-//#define INCLUDE_MQTT_SUPPORT
+// UsingEEPROM to store data
+#define USE_LITTLEFS    true
+#define USE_SPIFFS      false
+#define CurrentFileFS     "LittleFS"
 
 
-/********************************************
-   Should not need to edit below this line *
- * *****************************************/
-#include <ESP8266WiFi.h>
+// Force some params in Blynk, only valid for library version 1.0.1 and later
+#define TIMEOUT_RECONNECT_WIFI                    10000L
+#define STATUS_CHECK_INTERVAL                     15000L
+#define RESET_IF_CONFIG_TIMEOUT                   true
+#define CONFIG_TIMEOUT_RETRYTIMES_BEFORE_RESET    3
 
-#ifdef INCLUDE_BLYNK_SUPPORT
-//#define BLYNK_PRINT Serial    // Comment this out to disable prints and save space
+
+/* needed to set hostname */
+extern "C" {
+#include "user_interface.h"
+}
+
+#include <BlynkSimpleEsp8266_WM.h>
+
+// Comment this out to disable prints and save space
+
+/*
 #include <BlynkSimpleEsp8266.h>
-
-static bool BLYNK_ENABLED = true;
-#endif
-
-#ifdef INCLUDE_MQTT_SUPPORT
-#include <PubSubClient.h>        //https://github.com/Imroy/pubsubclient
-
-WiFiClient wclient;
-PubSubClient mqttClient(wclient);
-
-static bool MQTT_ENABLED              = false;
-int         lastMQTTConnectionAttempt = 0;
-#endif
-
-#include <ESP_WiFiManager.h>          //https://github.com/madhephaestus/Esp32WifiManager
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>          //https://github.com/zhouhan0126/WIFIMANAGER-ESP32
 
 #include <EEPROM.h>
+*/
 
-#define EEPROM_SALT 12667
-typedef struct {
-  char  bootState[4]      = "off";
-  char  hostname[33]      = HOSTNAME;
-  char  blynkToken[33]    = "";
-  char  blynkServer[33]   = "serverino.sapacasa.it";
-  char  blynkPort[6]      = "8080";
-  char  mqttHostname[33]  = HOSTNAME;
-  char  mqttPort[6]       = "1883";
-  char  mqttClientID[24]  = HOSTNAME;
-  char  mqttTopic[33]     = HOSTNAME;
-  int   salt              = EEPROM_SALT;
-} WMSettings;
+// 
+bool LOAD_DEFAULT_CONFIG_DATA = false;
 
-WMSettings settings;
+Blynk_WM_Configuration defaultConfig =
+{
+  "NonSSL",            // SSL
+  "sapacasa",          // ESSID1
+  "",                  // ESSID1 PASS
+  "",                  // EESID2
+  "",                  // EEDID2 PASS    
+  "blynk.sapacasa.it", // URL Blynk Server 1
+  "token",             // Blynk Token 1
+  "",                  // URL Blynk Server 2
+  "",                  // Blynk Token 2
+  8080,                // Blynk Port (9443 SSL)
+  "sonoff_switch",     // Device name
+  0                    // Checksum non usato
+};
 
-#include <ArduinoOTA.h>
+char* HOSTNAME = defaultConfig.board_name;
 
+// 
+#define BOOTSTATE_LEN                3
+char    BOOTSTATE[BOOTSTATE_LEN+1] = "off";
+
+#define USE_DYNAMIC_PARAMETERS  true
+
+#define BOOT_STATE_LEN      4
+char BOOT_STATE[BOOT_STATE_LEN + 1]   = "off";
+
+
+MenuItem myMenuItems [] = {
+  { "bste", "Stato iniziale", BOOT_STATE, BOOT_STATE_LEN }
+};
+
+uint16_t NUM_MENU_ITEMS = sizeof(myMenuItems) / sizeof(MenuItem);  //MenuItemSize;
+
+
+// #include <ArduinoOTA.h>
 
 //for LED status
 #include <Ticker.h>
@@ -94,63 +126,87 @@ int buttonState = HIGH;
 
 static long startPress = 0;
 
-//http://stackoverflow.com/questions/9072320/split-string-into-string-array
-String getValue(String data, char separator, int index)
-{
-  int found = 0;
-  int strIndex[] = {0, -1};
-  int maxIndex = data.length()-1;
-
-  for(int i=0; i<=maxIndex && found<=index; i++){
-    if(data.charAt(i)==separator || i==maxIndex){
-        found++;
-        strIndex[0] = strIndex[1]+1;
-        strIndex[1] = (i == maxIndex) ? i+1 : i;
-    }
-  }
-
-  return found>index ? data.substring(strIndex[0], strIndex[1]) : "";
-}
-
-void tick()
-{
+void tick() {
   //toggle state
   int state = digitalRead(SONOFF_LED);  // get the current state of GPIO1 pin
   digitalWrite(SONOFF_LED, !state);     // set pin to the opposite state
 }
 
-//gets called when WiFiManager enters configuration mode
-void configModeCallback (ESP_WiFiManager *myWiFiManager) {
-  Serial.println("Entered config mode");
-  Serial.println(WiFi.softAPIP());
-  //if you used auto generated SSID, print it
-  Serial.println(myWiFiManager->getConfigPortalSSID());
-  //entered config mode, make led toggle faster
-  ticker.attach(0.2, tick);
+
+void setupPortal() {
+
+  // Setup WLAN and Blynk
+  byte mac[6];
+  char macAddr[6];
+  WiFi.macAddress(mac);
+
+  
+  String hostname = Blynk.getBoardName();
+  char blynk_hostname[hostname.length() + 1];
+  hostname.toCharArray(blynk_hostname, sizeof(blynk_hostname));
+
+  WiFi.hostname(hostname);
+
+  sprintf(macAddr, "%2X%2X%2X", mac[3], mac[4], mac[5]);
+  String config_portal_pass = String(HOSTNAME);
+  String config_portal_ssid = String(HOSTNAME) + String(macAddr);
+   
+  Blynk.setConfigPortal ( config_portal_ssid, config_portal_pass);
+  Blynk.setConfigPortalIP ( IPAddress ( CONFIG_PORTAL_IPADDRESS ) );
+  Blynk.setConfigPortalChannel(0);
+  
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+  Serial.print( "\nSetting up WLAN and Blynk " );
+  Serial.print ( "Blynk.setConfigPortal(" ); 
+  Serial.print ( config_portal_ssid ); Serial.print ( "," );  
+  Serial.print ( "  Config Portal will be found at IP: " ); Serial.print ( IPAddress ( CONFIG_PORTAL_IPADDRESS ) );
+  Serial.print ( "\n Hostname: "); 
+  Serial.print ( blynk_hostname ); 
+  Serial.println ( "\n" );
+#endif
+  
+  Blynk.begin(blynk_hostname); // DHCP (router) device name
+  
 }
 
-#ifdef INCLUDE_BLYNK_SUPPORT
+void check_status()
+{
+  static unsigned long checkstatus_timeout = 0;
+
+  if ( (millis() <= checkstatus_timeout) && (checkstatus_timeout !=  0) )
+    return;
+
+  if ( Blynk.connected() ) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+    Serial.println ("\nBlynk connected");
+    Serial.println ("Board Name : " + Blynk.getBoardName());
+    Serial.println ( "Blynk connected just fine" ); 
+    Serial.print   ( "  IP address  " ); Serial.println ( WiFi.localIP() ) ;
+    Serial.print   ( "  MAC address " ); Serial.println ( WiFi.macAddress() );  
+    Serial.println ();
+  #endif  
+    ticker.detach();
+
+  } else {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+    Serial.println ( "Blynk NOT CONNECTED \n\n" );
+#endif
+    ticker.attach(0.6, tick);
+  }
+
+  checkstatus_timeout = millis() + STATUS_CHECK_INTERVAL;
+}
+
 void updateBlynk(int channel) {
   int state = digitalRead(SONOFF_RELAY_PINS[channel]);
   Blynk.virtualWrite(channel * 5 + 4, state * 255);
 }
-#endif
-
-#ifdef INCLUDE_MQTT_SUPPORT
-void updateMQTT(int channel) {
-  int state = digitalRead(SONOFF_RELAY_PINS[channel]);
-  char topic[50];
-  sprintf(topic, "%s/channel-%d/status", settings.mqttTopic, channel);
-  String stateString = state == 0 ? "off" : "on";
-  if ( channel >= SONOFF_AVAILABLE_CHANNELS) {
-    stateString = "disabled";
-  }
-  mqttClient.publish(topic, stateString);
-}
-#endif
 
 void setState(int state, int channel) {
   //relay
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+  Serial.println("Set state " + String(state) + " channel " + String(channel));
+#endif  
   digitalWrite(SONOFF_RELAY_PINS[channel], state);
 
   //led
@@ -158,15 +214,8 @@ void setState(int state, int channel) {
     digitalWrite(SONOFF_LED, (state + 1) % 2); // led is active low
   }
 
-#ifdef INCLUDE_BLYNK_SUPPORT
   //blynk
   updateBlynk(channel);
-#endif
-
-#ifdef INCLUDE_MQTT_SUPPORT
-  //MQTT
-  updateMQTT(channel);
-#endif
 }
 
 void turnOn(int channel = 0) {
@@ -183,19 +232,11 @@ ICACHE_RAM_ATTR void toggleState() {
   cmd = CMD_BUTTON_CHANGE;
 }
 
-//flag for saving data
-bool shouldSaveConfig = false;
-
-//callback notifying us of the need to save config
-void saveConfigCallback () {
-  Serial.println("Should save config");
-  shouldSaveConfig = true;
-}
-
-
 void toggle(int channel = 0) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
   Serial.println("toggle state");
   Serial.println(digitalRead(SONOFF_RELAY_PINS[channel]));
+#endif
   int relayState = digitalRead(SONOFF_RELAY_PINS[channel]) == HIGH ? LOW : HIGH;
   setState(relayState, channel);
 }
@@ -219,11 +260,29 @@ void reset() {
   //reset wifi credentials
   WiFi.disconnect();
   delay(1000);
+  Blynk.clearConfigData();
+  delay(2000);
   ESP.reset();
   delay(1000);
+
+  
 }
 
-#ifdef INCLUDE_BLYNK_SUPPORT
+/* ON OFF BY PARAM VPIN 5*/
+BLYNK_WRITE(5) {
+  int a = param.asInt();
+  if (a) {
+    turnOn();
+  } else {
+    turnOff();
+  }
+}
+
+/* ON OFF BY PARAM VPIN 5*/
+BLYNK_READ(5) {
+  Blynk.virtualWrite(5, digitalRead(0));
+}
+
 /**********
  * VPIN % 5
  * 0 off
@@ -238,7 +297,14 @@ BLYNK_WRITE_DEFAULT() {
   int channel = pin / 5;
   int action = pin % 5;
   int a = param.asInt();
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+  Serial.println("WRITE PIN "  + String(pin));
+  Serial.println("WRITE CHANNEL "  + String(channel));
+  Serial.println("WRITE ACTION "  + String(action));
+  Serial.println("WRITE PARAM A "  + String(a));
+#endif
   if (a != 0) {
+    
     switch(action) {
       case 0:
         turnOff(channel);
@@ -250,9 +316,11 @@ BLYNK_WRITE_DEFAULT() {
         toggle(channel);
         break;
       default:
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
         Serial.print("unknown action");
         Serial.print(action);
         Serial.print(channel);
+#endif
         break;
     }
   }
@@ -263,6 +331,12 @@ BLYNK_READ_DEFAULT() {
   int pin = request.pin;
   int channel = pin / 5;
   int action = pin % 5;
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+  Serial.println("READ PIN "  + String(pin));
+  Serial.println("READ CHANNEL "  + String(channel));
+  Serial.println("READ ACTION "  + String(action));
+  Serial.println("READ RELAY PIN "  + String(SONOFF_RELAY_PINS[channel]));
+#endif
   Blynk.virtualWrite(pin, digitalRead(SONOFF_RELAY_PINS[channel]));
 
 }
@@ -283,235 +357,19 @@ BLYNK_WRITE(31) {
   }
 }
 
-BLYNK_READ
-#endif
-
-#ifdef INCLUDE_MQTT_SUPPORT
-void mqttCallback(const MQTT::Publish& pub) {
-  Serial.print(pub.topic());
-  Serial.print(" => ");
-  if (pub.has_stream()) {
-    int BUFFER_SIZE = 100;
-    uint8_t buf[BUFFER_SIZE];
-    int read;
-    while (read = pub.payload_stream()->read(buf, BUFFER_SIZE)) {
-      Serial.write(buf, read);
-    }
-    pub.payload_stream()->stop();
-    Serial.println("had buffer");
-  } else {
-    Serial.println(pub.payload_string());
-    String topic = pub.topic();
-    String payload = pub.payload_string();
-
-    if (topic == settings.mqttTopic) {
-      Serial.println("exact match");
-      return;
-    }
-
-    if (topic.startsWith(settings.mqttTopic)) {
-      Serial.println("for this device");
-      topic = topic.substring(strlen(settings.mqttTopic) + 1);
-      String channelString = getValue(topic, '/', 0);
-      if(!channelString.startsWith("channel-")) {
-        Serial.println("no channel");
-        return;
-      }
-      channelString.replace("channel-", "");
-      int channel = channelString.toInt();
-      Serial.println(channel);
-      if (payload == "on") {
-        turnOn(channel);
-      }
-      if (payload == "off") {
-        turnOff(channel);
-      }
-      if (payload == "toggle") {
-        toggle(channel);
-      }
-      if(payload == "") {
-        updateMQTT(channel);
-      }
-
-    }
-  }
-}
-
-#endif
 
 void setup()
 {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
   Serial.begin(115200);
+  while (!Serial);
+#endif
 
   //set led pin as output
   pinMode(SONOFF_LED, OUTPUT);
-  // start ticker with 0.5 because we start in AP mode and try to connect
-  ticker.attach(0.6, tick);
+  setupPortal();
 
-
-  char *hostname = HOSTNAME;
-
-  ESP_WiFiManager wifiManager;
-  //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
-  wifiManager.setAPCallback(configModeCallback);
-
-  //timeout - this will quit WiFiManager if it's not configured in 3 minutes, causing a restart
-  wifiManager.setConfigPortalTimeout(180);
-
-  //custom params
-  EEPROM.begin(512);
-  EEPROM.get(0, settings);
-  EEPROM.end();
-
-  if (settings.salt != EEPROM_SALT) {
-    Serial.println("Invalid settings in EEPROM, trying with defaults");
-    WMSettings defaults;
-    settings = defaults;
-  }
-
-
-  ESP_WMParameter custom_boot_state("boot-state", "on/off on boot", settings.bootState, 33);
-  wifiManager.addParameter(&custom_boot_state);
-
-  ESP_WMParameter custom_hostname("custom-hostname", "Sensor Hostname", settings.hostname, 33);
-  wifiManager.addParameter(&custom_hostname);
-
-
-  Serial.println(settings.bootState);
-
-#ifdef INCLUDE_BLYNK_SUPPORT
-  Serial.println(settings.blynkToken);
-  Serial.println(settings.blynkServer);
-  Serial.println(settings.blynkPort);
-
-  ESP_WMParameter custom_blynk_text("<br/>Blynk config. <br/> No token to disable.<br/>");
-  wifiManager.addParameter(&custom_blynk_text);
-
-  ESP_WMParameter custom_blynk_token("blynk-token", "blynk token", settings.blynkToken, 33);
-  wifiManager.addParameter(&custom_blynk_token);
-
-  ESP_WMParameter custom_blynk_server("blynk-server", "blynk server", settings.blynkServer, 33);
-  wifiManager.addParameter(&custom_blynk_server);
-
-  ESP_WMParameter custom_blynk_port("blynk-port", "port", settings.blynkPort, 6);
-  wifiManager.addParameter(&custom_blynk_port);
-#endif
-
-
-#ifdef INCLUDE_MQTT_SUPPORT
-  Serial.println(settings.mqttHostname);
-  Serial.println(settings.mqttPort);
-  Serial.println(settings.mqttClientID);
-  Serial.println(settings.mqttTopic);
-
-  WiFiManagerParameter custom_mqtt_text("<br/>MQTT config. <br/> No url to disable.<br/>");
-  wifiManager.addParameter(&custom_mqtt_text);
-
-  WiFiManagerParameter custom_mqtt_hostname("mqtt-hostname", "Hostname", settings.mqttHostname, 33);
-  wifiManager.addParameter(&custom_mqtt_hostname);
-
-  WiFiManagerParameter custom_mqtt_port("mqtt-port", "port", settings.mqttPort, 6);
-  wifiManager.addParameter(&custom_mqtt_port);
-
-  WiFiManagerParameter custom_mqtt_client_id("mqtt-client-id", "Client ID", settings.mqttClientID, 24);
-  wifiManager.addParameter(&custom_mqtt_client_id);
-
-  WiFiManagerParameter custom_mqtt_topic("mqtt-topic", "Topic", settings.mqttTopic, 33);
-  wifiManager.addParameter(&custom_mqtt_topic);
-#endif
-
-  //set config save notify callback
-  wifiManager.setSaveConfigCallback(saveConfigCallback);
-
-  // Getting saved hostname
-  if (!strcmp(settings.hostname,"")) {
-    strcpy(hostname, settings.hostname);
-  }
-
-  if (!wifiManager.autoConnect(hostname)) {
-    Serial.println("failed to connect and hit timeout");
-    //reset and try again, or maybe put it to deep sleep
-    ESP.reset();
-    delay(1000);
-  }
-
-  //Serial.println(custom_blynk_token.getValue());
-  //save the custom parameters to FS
-  if (shouldSaveConfig) {
-    Serial.println("Saving config");
-
-    strcpy(settings.bootState, custom_boot_state.getValue());
-    strcpy(settings.hostname, custom_hostname.getValue());
-
-#ifdef INCLUDE_BLYNK_SUPPORT
-    strcpy(settings.blynkToken, custom_blynk_token.getValue());
-
-    strcpy(settings.blynkServer, custom_blynk_server.getValue());
-    strcpy(settings.blynkPort, custom_blynk_port.getValue());
-#endif
-
-#ifdef INCLUDE_MQTT_SUPPORT
-    strcpy(settings.mqttHostname, custom_mqtt_hostname.getValue());
-    strcpy(settings.mqttPort, custom_mqtt_port.getValue());
-    strcpy(settings.mqttClientID, custom_mqtt_client_id.getValue());
-    strcpy(settings.mqttTopic, custom_mqtt_topic.getValue());
-#endif
-
-    Serial.println(settings.bootState);
-    Serial.println(settings.blynkToken);
-    Serial.println(settings.blynkServer);
-    Serial.println(settings.blynkPort);
-
-    EEPROM.begin(512);
-    EEPROM.put(0, settings);
-    EEPROM.end();
-  }
-
-#ifdef INCLUDE_BLYNK_SUPPORT
-  //config blynk
-  if (strlen(settings.blynkToken) == 0) {
-    BLYNK_ENABLED = false;
-  }
-  if (BLYNK_ENABLED) {
-    Blynk.config(settings.blynkToken, settings.blynkServer, atoi(settings.blynkPort));
-  }
-#endif
-
-
-#ifdef INCLUDE_MQTT_SUPPORT
-  //config mqtt
-  if (strlen(settings.mqttHostname) == 0) {
-    MQTT_ENABLED = false;
-  }
-  if (MQTT_ENABLED) {
-    mqttClient.set_server(settings.mqttHostname, atoi(settings.mqttPort));
-  }
-#endif
-
-  //OTA
-  ArduinoOTA.onStart([]() {
-    Serial.println("Start OTA");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  ArduinoOTA.setHostname(hostname);
-  ArduinoOTA.begin();
-
-  //if you get here you have connected to the WiFi
-  Serial.println("connected...yeey :)");
-  ticker.detach();
+  char *bootState = myMenuItems[0].pdata;
 
   //setup button
   pinMode(SONOFF_BUTTON, INPUT);
@@ -523,7 +381,8 @@ void setup()
 
    //TODO this should move to last state maybe
    //TODO multi channel support
-  if (strcmp(settings.bootState, "on") == 0) {
+
+  if (strcmp(bootState, "on") == 0) {
     turnOn();
   } else {
     turnOff();
@@ -533,52 +392,16 @@ void setup()
   if (!SONOFF_LED_RELAY_STATE) {
     digitalWrite(SONOFF_LED, LOW);
   }
-
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
   Serial.println("done setup");
+#endif
 }
 
+void loop() {
 
-void loop()
-{
+  Blynk.run();
+  check_status();
 
-  //ota loop
-  ArduinoOTA.handle();
-
-#ifdef INCLUDE_BLYNK_SUPPORT
-  //blynk connect and run loop
-  if (BLYNK_ENABLED) {
-    Blynk.run();
-  }
-#endif
-
-
-#ifdef INCLUDE_MQTT_SUPPORT
-  //mqtt loop
-  if (MQTT_ENABLED) {
-    if (!mqttClient.connected()) {
-      if(lastMQTTConnectionAttempt == 0 || millis() > lastMQTTConnectionAttempt + 3 * 60 * 1000) {
-        lastMQTTConnectionAttempt = millis();
-        Serial.println(millis());
-        Serial.println("Trying to connect to mqtt");
-        if (mqttClient.connect(settings.mqttClientID)) {
-          mqttClient.set_callback(mqttCallback);
-          char topic[50];
-          //sprintf(topic, "%s/+/+", settings.mqttTopic);
-          //mqttClient.subscribe(topic);
-          sprintf(topic, "%s/+", settings.mqttTopic);
-          mqttClient.subscribe(topic);
-
-          //TODO multiple relays
-          updateMQTT(0);
-        } else {
-          Serial.println("failed");
-        }
-      }
-    } else {
-      mqttClient.loop();
-    }
-  }
-#endif
 
   //delay(200);
   //Serial.println(digitalRead(SONOFF_BUTTON));
@@ -591,13 +414,19 @@ void loop()
         if (buttonState == LOW && currentState == HIGH) {
           long duration = millis() - startPress;
           if (duration < 1000) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
             Serial.println("short press - toggle relay");
+#endif
             toggle();
           } else if (duration < 5000) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
             Serial.println("medium press - reset");
+#endif
             restart();
           } else if (duration < 60000) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
             Serial.println("long press - reset settings");
+#endif           
             reset();
           }
         } else if (buttonState == HIGH && currentState == LOW) {
