@@ -1,12 +1,11 @@
-# SonoffBoilerplate - Slightly changed
+# Blynking SonOff - (Based on SonoffBoilerplate)
 
-This is a replacement firmware (Arduino IDE with ESP8266 core needed) for the ESP8266 based Sonoff devices. Use it as a starting block for customizing your Sonoff.
+This is a replacement firmware (Arduino IDE with ESP8266 core needed) for the ESP8266 based Sonoff devices mainly used for Blynk Server.
+Use it as a starting block for customizing your Sonoff.
 
-Actually this is same code of original *tzapu/SonoffBoilerplate* but use BlynkSimpleEsp8266 library (https://github.com/khoih-prog/Blynk_WM) to handle Wifi configuration.
-
+It is based on *tzapu/SonoffBoilerplate*. It use BlynkSimpleEsp8266_WM to handle Wifi connection and Blynk server configurations parameters.
 It also handle correctly sensor *hostname*
 
-Please note that is tested with ESP8266 Arduino Board version >=2.7.4
+Please note that is tested with ESP8266 Arduino Board version >= 2.7.4
 
-
-OTA Actually is disabled
+I dibled OTA because for SonOff basic the code seems too big to handle on the air updates.
