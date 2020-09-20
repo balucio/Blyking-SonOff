@@ -1,7 +1,7 @@
 /*
    1MB flash sizee
 
-   sonoff header
+   sonoff basic header  (1 - accanto switch)
    1 - vcc 3v3
    2 - rx
    3 - tx
@@ -20,17 +20,16 @@
 // DEBUG
 
 // #define BLYNK_PRINT Serial    
-#define BLYNK_WM_DEBUG 0
+// #define BLYNK_WM_DEBUG 1
 #define DOUBLERESETDETECTOR_DEBUG     false
 
 //// CONFIG PORTAL
 #define CONFIG_PORTAL_IPADDRESS 192,168,4,1
 
-#define   SONOFF_BUTTON             0
-#define   SONOFF_INPUT              14
-#define   SONOFF_LED                13
-#define   SONOFF_AVAILABLE_CHANNELS 1
-const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
+#define   SONOFF_BUTTON          0
+#define   SONOFF_INPUT           14
+#define   SONOFF_LED             13
+#define   SONOFF_RELAY_PIN       12
 
 /*
  * if this is false, led is used to signal startup state, then always on
@@ -42,7 +41,7 @@ const int SONOFF_RELAY_PINS[4] =    {12, 12, 12, 12};
 // UsingEEPROM to store data
 #define USE_LITTLEFS    true
 #define USE_SPIFFS      false
-#define CurrentFileFS     "LittleFS"
+#define CurrentFileFS   "LittleFS"
 
 
 // Force some params in Blynk, only valid for library version 1.0.1 and later
@@ -61,14 +60,11 @@ extern "C" {
 
 // Comment this out to disable prints and save space
 
-/*
-#include <BlynkSimpleEsp8266.h>
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <WiFiManager.h>          //https://github.com/zhouhan0126/WIFIMANAGER-ESP32
+#define   BLYNK_RELAY_VPIN       V5
+#define   BLYNK_RESTART_VPIN     V30
+#define   BLYNK_RESET_VPIN       V31
 
-#include <EEPROM.h>
-*/
+
 
 // 
 bool LOAD_DEFAULT_CONFIG_DATA = false;
@@ -108,8 +104,6 @@ MenuItem myMenuItems [] = {
 uint16_t NUM_MENU_ITEMS = sizeof(myMenuItems) / sizeof(MenuItem);  //MenuItemSize;
 
 
-// #include <ArduinoOTA.h>
-
 //for LED status
 #include <Ticker.h>
 Ticker ticker;
@@ -119,7 +113,6 @@ const int CMD_WAIT = 0;
 const int CMD_BUTTON_CHANGE = 1;
 
 int cmd = CMD_WAIT;
-//int relayState = HIGH;
 
 //inverted button state
 int buttonState = HIGH;
@@ -156,11 +149,11 @@ void setupPortal() {
   Blynk.setConfigPortalChannel(0);
   
 #if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-  Serial.print( "\nSetting up WLAN and Blynk " );
+  Serial.print( "\nImposto Rete Wifi e Blynk " );
   Serial.print ( "Blynk.setConfigPortal(" ); 
   Serial.print ( config_portal_ssid ); Serial.print ( "," );  
-  Serial.print ( "  Config Portal will be found at IP: " ); Serial.print ( IPAddress ( CONFIG_PORTAL_IPADDRESS ) );
-  Serial.print ( "\n Hostname: "); 
+  Serial.print ( "  IP del portale è: " ); Serial.print ( IPAddress ( CONFIG_PORTAL_IPADDRESS ) );
+  Serial.print ( "\n Nome host: "); 
   Serial.print ( blynk_hostname ); 
   Serial.println ( "\n" );
 #endif
@@ -177,19 +170,20 @@ void check_status()
     return;
 
   if ( Blynk.connected() ) {
+
 #if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-    Serial.println ("\nBlynk connected");
-    Serial.println ("Board Name : " + Blynk.getBoardName());
-    Serial.println ( "Blynk connected just fine" ); 
-    Serial.print   ( "  IP address  " ); Serial.println ( WiFi.localIP() ) ;
-    Serial.print   ( "  MAC address " ); Serial.println ( WiFi.macAddress() );  
+    Serial.println ("\nConnesso a Blynk");
+    Serial.println ("Nome dispositivo : " + Blynk.getBoardName());
+    Serial.print   ( "  Indirizzo IP " ); Serial.println ( WiFi.localIP() ) ;
+    Serial.print   ( "  Indirizzo MAC " ); Serial.println ( WiFi.macAddress() );  
     Serial.println ();
-  #endif  
+#endif  
+
     ticker.detach();
 
   } else {
 #if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-    Serial.println ( "Blynk NOT CONNECTED \n\n" );
+    Serial.println ( "NON CONNESSO \n\n" );
 #endif
     ticker.attach(0.6, tick);
   }
@@ -197,17 +191,13 @@ void check_status()
   checkstatus_timeout = millis() + STATUS_CHECK_INTERVAL;
 }
 
-void updateBlynk(int channel) {
-  int state = digitalRead(SONOFF_RELAY_PINS[channel]);
-  Blynk.virtualWrite(channel * 5 + 4, state * 255);
-}
-
-void setState(int state, int channel) {
+void setState(int state, int pin = SONOFF_RELAY_PIN) {
   //relay
+  
 #if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-  Serial.println("Set state " + String(state) + " channel " + String(channel));
-#endif  
-  digitalWrite(SONOFF_RELAY_PINS[channel], state);
+  Serial.println("Imposto stato Rele " + String(state) + " PIN/VPIN " + String(SONOFF_RELAY_PIN) + "/" + String(BLYNK_RELAY_VPIN) + " e commuto led.");
+#endif
+  digitalWrite(pin, state);
 
   //led
   if (SONOFF_LED_RELAY_STATE) {
@@ -215,30 +205,26 @@ void setState(int state, int channel) {
   }
 
   //blynk
-  updateBlynk(channel);
+  Blynk.virtualWrite(BLYNK_RELAY_VPIN, state);
 }
 
-void turnOn(int channel = 0) {
-  int relayState = HIGH;
-  setState(relayState, channel);
+void turnOn(int pin = SONOFF_RELAY_PIN) {
+  setState(HIGH, pin);
 }
 
-void turnOff(int channel = 0) {
-  int relayState = LOW;
-  setState(relayState, channel);
+void turnOff(int pin = SONOFF_RELAY_PIN) {
+  setState(LOW, pin);
 }
 
 ICACHE_RAM_ATTR void toggleState() {
   cmd = CMD_BUTTON_CHANGE;
 }
 
-void toggle(int channel = 0) {
-#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-  Serial.println("toggle state");
-  Serial.println(digitalRead(SONOFF_RELAY_PINS[channel]));
-#endif
-  int relayState = digitalRead(SONOFF_RELAY_PINS[channel]) == HIGH ? LOW : HIGH;
-  setState(relayState, channel);
+void toggle(int pin = SONOFF_RELAY_PIN) {
+
+  int state = digitalRead(pin);
+  int relayState = state == HIGH ? LOW : HIGH;
+  setState(relayState, pin);
 }
 
 void restart() {
@@ -248,15 +234,7 @@ void restart() {
 }
 
 void reset() {
-  //reset settings to defaults
-  //TODO turn off relays before restarting
-  /*
-    WMSettings defaults;
-    settings = defaults;
-    EEPROM.begin(512);
-    EEPROM.put(0, settings);
-    EEPROM.end();
-  */
+
   //reset wifi credentials
   WiFi.disconnect();
   delay(1000);
@@ -268,91 +246,52 @@ void reset() {
   
 }
 
-/* ON OFF BY PARAM VPIN 5*/
-BLYNK_WRITE(5) {
-  int a = param.asInt();
-  if (a) {
-    turnOn();
-  } else {
-    turnOff();
+/* ON OFF BY PARAM VPIN 5 */
+BLYNK_WRITE(BLYNK_RELAY_VPIN) {
+
+  int p = param.asInt() % 3;
+
+  switch (p) {
+
+    case 0: turnOff(); break;
+    case 1: turnOn(); break;
+    case 2: toggle(); break;
+    default:
+
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+       Serial.println("Valore non supportato");
+#endif
+       break;
+
   }
 }
 
-/* ON OFF BY PARAM VPIN 5*/
-BLYNK_READ(5) {
-  Blynk.virtualWrite(5, digitalRead(0));
+/* ON OFF BY PARAM VPIN 5 */
+BLYNK_READ(BLYNK_RELAY_VPIN) {
+  int state = digitalRead(SONOFF_RELAY_PIN);
+  Blynk.virtualWrite(BLYNK_RELAY_VPIN, state);
 }
 
-/**********
- * VPIN % 5
- * 0 off
- * 1 on
- * 2 toggle
- * 3 value
- * 4 led
- ***********/
-
-BLYNK_WRITE_DEFAULT() {
-  int pin = request.pin;
-  int channel = pin / 5;
-  int action = pin % 5;
-  int a = param.asInt();
-#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-  Serial.println("WRITE PIN "  + String(pin));
-  Serial.println("WRITE CHANNEL "  + String(channel));
-  Serial.println("WRITE ACTION "  + String(action));
-  Serial.println("WRITE PARAM A "  + String(a));
-#endif
-  if (a != 0) {
-    
-    switch(action) {
-      case 0:
-        turnOff(channel);
-        break;
-      case 1:
-        turnOn(channel);
-        break;
-      case 2:
-        toggle(channel);
-        break;
-      default:
-#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-        Serial.print("unknown action");
-        Serial.print(action);
-        Serial.print(channel);
-#endif
-        break;
-    }
-  }
-}
-
-BLYNK_READ_DEFAULT() {
-  // Generate random response
-  int pin = request.pin;
-  int channel = pin / 5;
-  int action = pin % 5;
-#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
-  Serial.println("READ PIN "  + String(pin));
-  Serial.println("READ CHANNEL "  + String(channel));
-  Serial.println("READ ACTION "  + String(action));
-  Serial.println("READ RELAY PIN "  + String(SONOFF_RELAY_PINS[channel]));
-#endif
-  Blynk.virtualWrite(pin, digitalRead(SONOFF_RELAY_PINS[channel]));
-
-}
 
 //restart - button
-BLYNK_WRITE(30) {
+BLYNK_WRITE(BLYNK_RESTART_VPIN) {
   int a = param.asInt();
   if (a != 0) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+    Serial.println("RIAVVIO");
+#endif
     restart();
   }
 }
 
 //reset - button
-BLYNK_WRITE(31) {
+BLYNK_WRITE(BLYNK_RESET_VPIN) {
   int a = param.asInt();
   if (a != 0) {
+#if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
+    Serial.println("RESET");
+#endif
+
     reset();
   }
 }
@@ -377,10 +316,7 @@ void setup()
 
   //setup relay
   //TODO multiple relays
-  pinMode(SONOFF_RELAY_PINS[0], OUTPUT);
-
-   //TODO this should move to last state maybe
-   //TODO multi channel support
+  pinMode(SONOFF_RELAY_PIN, OUTPUT);
 
   if (strcmp(bootState, "on") == 0) {
     turnOn();
@@ -395,13 +331,13 @@ void setup()
 #if defined BLYNK_WM_DEBUG  && BLYNK_WM_DEBUG 
   Serial.println("done setup");
 #endif
+
 }
 
 void loop() {
 
   Blynk.run();
   check_status();
-
 
   //delay(200);
   //Serial.println(digitalRead(SONOFF_BUTTON));
