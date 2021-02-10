@@ -8,4 +8,4 @@ It also handle correctly sensor *hostname*
 
 Please note that is tested with ESP8266 Arduino Board version >= 2.7.4
 
-I dibled OTA because for SonOff basic the code seems too big to handle on the air updates.
+I disabled OTA because for SonOff basic the code seems too big to handle on the air updates.
